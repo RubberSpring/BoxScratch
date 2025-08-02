@@ -1,0 +1,10 @@
+{
+    "cmake.ignoreCMakeListsMissing": true,
+    "files.associations": {
+        "*.jinja": "jinja",
+        "Doxyfile": "doxyfile",
+        "fstream": "cpp",
+        "filesystem": "cpp",
+        "vector": "cpp"
+    }
+}
