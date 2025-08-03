@@ -2,10 +2,9 @@
 #define STACK_BXSCT_H
 #include <boxScratch/blocks.h>
 
-class Stack
-{
+class Stack {
 public:
-    std::vector<Block*> blocks;
+    std::vector<Block> blocks;
 };
 
 #endif

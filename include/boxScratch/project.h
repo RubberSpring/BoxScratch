@@ -1,13 +1,15 @@
 #ifndef SCRATCHPJCT_BXSCT_H
 #define SCRATCHPJCT_BXSCT_H
-#include <boxScratch/stack.h>
+#include <boxScratch/sprite.h>
 #include <map>
 
-class Project
-{
+class Project {
 public:
-    std::map<std::string, Block*> blockMap;
-    std::vector<Stack> stacks;
+    std::map<std::string, Block> blockMap;
+    std::map<std::string, Variable> variableMap;
+    std::map<std::string, List> listMap;
+    std::map<std::string, Broadcast> broadcastMap;
+    std::vector<Sprite> sprites;
 };
 
 #endif
