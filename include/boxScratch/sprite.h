@@ -6,31 +6,39 @@
 class Costume {
 public:
     std::string name;
-    std::string image;
+    std::string dataFormat;
+    std::string dataName;
+    Image cpuImage;
+    Image ogImage;
+    Texture2D gpuImage;
+    float width;
+    float height;
     int number;
+    int id;
 };
 
 class ScratchSound {
 public:
     std::string name;
-    std::string sound;
     int number;
 };
 
 class Sprite {
 public:
+    std::string name;
     std::vector<Stack> stacks;
     std::vector<Costume> costumes;
     std::vector<ScratchSound> sounds;
-    std::string name;
     std::vector<Variable> variables;
     std::vector<List> lists;
+    std::vector<Broadcast> broadcasts;
     double x;
     double y;
     bool visible;
     double size;
     double direction;
     bool isStage;
+    int costumeIndex;
 };
 
 #endif

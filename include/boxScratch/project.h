@@ -6,6 +6,8 @@
 class Project {
 public:
     std::map<std::string, Block> blockMap;
+    std::vector<Costume> costumes;
+    std::vector<ScratchSound> sounds;
     std::map<std::string, Variable> variableMap;
     std::map<std::string, List> listMap;
     std::map<std::string, Broadcast> broadcastMap;

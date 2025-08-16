@@ -1,6 +1,7 @@
-#include <nlohmann/json.hpp>
+#include <json.hpp>
 #include "raylib.h"
 #include <zip.h>
+#include <lunasvg.h>
 
 #include <iostream>
 #include <filesystem>
@@ -12,7 +13,35 @@
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
+int findIndex(std::vector<Costume>& v, Costume val) {
+    for (int i = 0; i < v.size(); i++) {
+      
+      	// When the element is found
+        if (v[i].dataName == val.dataName) {
+            return i;
+        }
+    }
+  	
+  	// When the element is not found
+  	return -1;
+}
+
+int screenWidth = 480; // Scratch stage dimentions
+int screenHeight = 360;
+
+Vector2 scratchToRaylibVec(int x, int y) {
+    Vector2 vec;
+    vec.x = x + screenWidth / 2;
+    vec.y = y + screenHeight / 2;
+    return vec;
+}
+
 int main(void) {
+    fs::path projectPath("projects/");
+    if (!fs::exists(projectPath)) {
+        fs::create_directory(projectPath);
+    }
+
     // Collect project files
     std::string path = (fs::current_path() / "projects").string();
     std::vector<std::string> projectPaths;
@@ -123,14 +152,23 @@ int main(void) {
         Sprite tempSprite;
         tempSprite.isStage = sprite["isStage"];
         tempSprite.name = sprite["name"];
+        tempSprite.costumeIndex = sprite["currentCostume"];
+        if (!tempSprite.isStage) {
+            tempSprite.x = sprite["x"];
+            tempSprite.y = sprite["x"];
+        } else {
+            tempSprite.x = 0;
+            tempSprite.y = 0;
+        }
         // Variables
         for (auto& [key, value]: sprite["variables"].items()) {
             Variable tempVariable;
             tempVariable.name = value.at(0);
             tempVariable.value = to_string(value.at(1));
             project.variableMap[key] = tempVariable;
+            tempSprite.variables.push_back(tempVariable);
         }
-        std::cout << "Variables deserialized\n";
+        std::cout << "Variables deserialized [" << tempSprite.name << "]\n";
         // Lists
         for (auto& [key, value]: sprite["lists"].items()) {
             List tempList;
@@ -139,15 +177,17 @@ int main(void) {
                 tempList.value.push_back(listVal);
             }
             project.listMap[key] = tempList;
+            tempSprite.lists.push_back(tempList);
         }
-        std::cout << "Lists deserialized\n";
+        std::cout << "Lists deserialized [" << tempSprite.name << "]\n";
         // Broadcasts
         for (auto& [id, name]: sprite["broadcasts"].items()) {
             Broadcast tempBroadcast;
             tempBroadcast.name = name;
             project.broadcastMap[id] = tempBroadcast;
+            tempSprite.broadcasts.push_back(tempBroadcast);
         }
-        std::cout << "Broadcasts deserialized\n";
+        std::cout << "Broadcasts deserialized [" << tempSprite.name << "]\n";
         // Blocks
         for (auto& [id, block]: sprite["blocks"].items()) {
             Block tempBlock;
@@ -155,7 +195,6 @@ int main(void) {
             tempBlock.next = to_string(block["next"]);
             tempBlock.parent = to_string(block["parent"]);
             for (auto& [arg, val]: block["inputs"].items()) {
-                std::cout << arg << "\n";
                 if (arg == "SUBSTACK" || arg == "TO") {
                     tempBlock.inputs[arg] = val.at(1);
                 } else {
@@ -163,54 +202,95 @@ int main(void) {
                 }
             }
             tempBlock.topLevel = block["topLevel"];
+            tempBlock.owner = tempSprite.name;
+            project.blockMap[id] = tempBlock;
         }
-        std::cout << "Blocks deserialized\n";
+        std::cout << "Blocks deserialized [" << tempSprite.name << "]\n";
         // Costumes
-        int costumeIndex = 1;
+        tempSprite.costumeIndex = sprite["currentCostume"];
         for (auto& costume: sprite["costumes"]) {
             Costume tempCostume;
             tempCostume.name = costume["name"];
-            tempCostume.number = costumeIndex;
-            costumeIndex += 1;
-            std::ifstream costumeFile(cachedPath.string() + to_string(costume["md5ext"]));
-            std::stringstream costumeBuffer;
-            costumeBuffer << costumeFile.rdbuf();
-            tempCostume.image = costumeBuffer.str();
-            costumeFile.close();
+            const std::string dot = ".";
+            tempCostume.dataName = costume["assetId"];
+            std::string dataFormat = to_string(costume["dataFormat"]);
+            if (dataFormat.size() > 1) {
+                tempCostume.dataFormat = dot + dataFormat.substr(1, dataFormat.size() - 2);
+            }
+            tempSprite.costumes.push_back(tempCostume);
+            project.costumes.push_back(tempCostume);
         }
+        std::cout << "Costumes deserialized [" << tempSprite.name << "]\n";
+        // Sounds
         int soundIndex = 1;
-        std::cout << "Costumes deserialized\n";
         for (auto& sound: sprite["sounds"]) {
             ScratchSound tempSound;
             tempSound.name = sound["name"];
             tempSound.number = soundIndex;
             soundIndex += 1;
-            std::ifstream soundFile(cachedPath.string() + to_string(sound["md5ext"]));
-            std::stringstream soundBuffer;
-            soundBuffer << soundFile.rdbuf();
-            tempSound.sound = soundBuffer.str();
-            soundFile.close();
+            tempSprite.sounds.push_back(tempSound);
+            project.sounds.push_back(tempSound);
         }
+        project.sprites.push_back(tempSprite);  
     }
-    std::cout << "Project populated!\n";
-
-    const int screenWidth = 480; // Scratch stage dimentions
-    const int screenHeight = 360;
+    std::cout << "Project populated!\n";    
 
     InitWindow(screenWidth, screenHeight, "BoxScratch");
 
     SetTargetFPS(30); // Scratch max FPS (can break projects when changed)
 
+    for (auto& costume: project.costumes) {
+        std::string cachedFolder = "cached/";
+        auto oldCostume = costume;
+        std::vector<Costume> v = project.costumes;
+        std::string pathSvg = cachedFolder + costume.dataName + costume.dataFormat;
+        auto document = lunasvg::Document::loadFromFile(pathSvg);
+        if (document == nullptr) {
+            return -1;
+        }
+        auto bitmap = document->renderToBitmap();
+        if (bitmap.isNull()) {
+            return -1;
+        }
+        costume.width = bitmap.width();
+        costume.height = bitmap.height();
+        bitmap.writeToPng(cachedFolder + costume.dataName + ".png");
+        Image tempImage = LoadImage((cachedFolder + costume.dataName + ".png").c_str());
+        costume.ogImage = ImageCopy(tempImage);
+        costume.cpuImage = ImageCopy(tempImage);
+        costume.gpuImage = LoadTextureFromImage(tempImage);
+        UnloadImage(tempImage);
+        for (auto &i : v) {
+            if (i.dataName == costume.dataName) {
+                project.costumes.at(findIndex(v, i)) = costume;
+            }
+        }
+    }
+
     // Main loop
     while (!WindowShouldClose())
     {
+        int blockPointer = 0;
         BeginDrawing();
 
             ClearBackground(WHITE);
 
-            DrawText("Congrats! You created your first window!", 0, 0, 20, LIGHTGRAY);
+            // Block execution goes here
+
+            // Render
+            for (auto& sprite: project.sprites) {
+                for (auto &i : project.costumes) {
+                    if (sprite.costumes.at(sprite.costumeIndex).dataName == i.dataName) {
+                        Vector2 pos = scratchToRaylibVec(sprite.x, sprite.y);
+                        pos.x = pos.x - i.width / 2;
+                        pos.y = pos.y - i.height / 2;
+                        DrawTextureV(i.gpuImage, pos, WHITE);
+                    }
+                }
+            }
 
         EndDrawing();
+        blockPointer += 1;
     }
 
     CloseWindow();

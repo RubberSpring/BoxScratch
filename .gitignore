@@ -43,3 +43,6 @@
 # BoxScratch folders
 projects/
 cached/
+
+# Build folder
+build/

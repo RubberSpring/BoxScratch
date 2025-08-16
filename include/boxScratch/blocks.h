@@ -9,6 +9,7 @@ public:
     std::string id;
     std::string next;
     std::string parent;
+    std::string owner;
     std::map<std::string, std::string> inputs;
     bool topLevel;
     int stackId;
