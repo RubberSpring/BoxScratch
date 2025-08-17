@@ -2,6 +2,7 @@
 #include "raylib.h"
 #include <zip.h>
 #include <lunasvg.h>
+#include <ini.h>
 
 #include <iostream>
 #include <filesystem>
@@ -28,6 +29,7 @@ int findIndex(std::vector<Costume>& v, Costume val) {
 
 int screenWidth = 480; // Scratch stage dimentions
 int screenHeight = 360;
+int upscaling = 2;
 
 Vector2 scratchToRaylibVec(int x, int y) {
     Vector2 vec;
@@ -37,6 +39,11 @@ Vector2 scratchToRaylibVec(int x, int y) {
 }
 
 int main(void) {
+    mINI::INIFile file("config.ini");
+
+    mINI::INIStructure ini;
+    file.read(ini);
+
     fs::path projectPath("projects/");
     if (!fs::exists(projectPath)) {
         fs::create_directory(projectPath);
@@ -68,6 +75,23 @@ int main(void) {
     int selectProject;
     std::cout << "Select a project from the list (number): ";
     std::cin >> selectProject;
+
+    screenHeight = std::stoi(ini["generic"]["screenHeight"]);
+    screenWidth = std::stoi(ini["generic"]["screenWidth"]);
+    upscaling = std::stoi(ini["generic"]["upscaling"]);
+
+    fs::path projectFilez = projectPaths.at(selectProject);
+    if (ini.has(projectFilez.stem().string())) {
+        if (ini[projectFilez.stem().string()].has("screenWidth")) {
+            screenWidth = std::stoi(ini[projectFilez.stem().string()]["screenWidth"]);
+        }
+        if (ini[projectFilez.stem().string()].has("screenHeight")) {
+            screenHeight = std::stoi(ini[projectFilez.stem().string()]["screenHeight"]);
+        }
+        if (ini[projectFilez.stem().string()].has("upscaling")) {
+            upscaling = std::stoi(ini[projectFilez.stem().string()]["upscaling"]);
+        }
+    }
 
     int err = 0;
     zip* archive = zip_open(projectPaths.at(selectProject).c_str(), 0, &err);
@@ -243,23 +267,33 @@ int main(void) {
         std::string cachedFolder = "cached/";
         auto oldCostume = costume;
         std::vector<Costume> v = project.costumes;
-        std::string pathSvg = cachedFolder + costume.dataName + costume.dataFormat;
-        auto document = lunasvg::Document::loadFromFile(pathSvg);
-        if (document == nullptr) {
-            return -1;
+        std::string filePath = cachedFolder + costume.dataName + costume.dataFormat;
+        if (costume.dataFormat == ".png") {
+            Image tempImage = LoadImage((cachedFolder + costume.dataName + ".png").c_str());
+            costume.width = tempImage.width;
+            costume.height = tempImage.height;
+            costume.ogImage = ImageCopy(tempImage);
+            costume.cpuImage = ImageCopy(tempImage);
+            costume.gpuImage = LoadTextureFromImage(tempImage);
+            UnloadImage(tempImage);
+        } else {
+            auto document = lunasvg::Document::loadFromFile(filePath);
+            if (document == nullptr) {
+                return -1;
+            }
+            auto bitmap = document->renderToBitmap();
+            if (bitmap.isNull()) {
+                return -1;
+            }
+            costume.width = bitmap.width();
+            costume.height = bitmap.height();
+            bitmap.writeToPng(cachedFolder + costume.dataName + ".png");
+            Image tempImage = LoadImage((cachedFolder + costume.dataName + ".png").c_str());
+            costume.ogImage = ImageCopy(tempImage);
+            costume.cpuImage = ImageCopy(tempImage);
+            costume.gpuImage = LoadTextureFromImage(tempImage);
+            UnloadImage(tempImage);
         }
-        auto bitmap = document->renderToBitmap();
-        if (bitmap.isNull()) {
-            return -1;
-        }
-        costume.width = bitmap.width();
-        costume.height = bitmap.height();
-        bitmap.writeToPng(cachedFolder + costume.dataName + ".png");
-        Image tempImage = LoadImage((cachedFolder + costume.dataName + ".png").c_str());
-        costume.ogImage = ImageCopy(tempImage);
-        costume.cpuImage = ImageCopy(tempImage);
-        costume.gpuImage = LoadTextureFromImage(tempImage);
-        UnloadImage(tempImage);
         for (auto &i : v) {
             if (i.dataName == costume.dataName) {
                 project.costumes.at(findIndex(v, i)) = costume;
@@ -270,7 +304,6 @@ int main(void) {
     // Main loop
     while (!WindowShouldClose())
     {
-        int blockPointer = 0;
         BeginDrawing();
 
             ClearBackground(WHITE);
@@ -281,6 +314,9 @@ int main(void) {
             for (auto& sprite: project.sprites) {
                 for (auto &i : project.costumes) {
                     if (sprite.costumes.at(sprite.costumeIndex).dataName == i.dataName) {
+                        if (sprite.isStage) {
+                            DrawTexture(i.gpuImage, 0, 0, WHITE);   
+                        }
                         Vector2 pos = scratchToRaylibVec(sprite.x, sprite.y);
                         pos.x = pos.x - i.width / 2;
                         pos.y = pos.y - i.height / 2;
@@ -290,10 +326,11 @@ int main(void) {
             }
 
         EndDrawing();
-        blockPointer += 1;
     }
 
     CloseWindow();
+
+    fs::remove_all("cached/");
 
     return 0;
 }
