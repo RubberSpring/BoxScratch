@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 using json = nlohmann::json;
 
 int findIndex(std::vector<Costume>& v, Costume val) {
-    for (int i = 0; i < v.size(); i++) {
+    for (int i = 0; i < (int)v.size(); i++) {
       
       	// When the element is found
         if (v[i].dataName == val.dataName) {
@@ -27,15 +27,46 @@ int findIndex(std::vector<Costume>& v, Costume val) {
   	return -1;
 }
 
+int findSpriteIndex(std::vector<Sprite>& v, Sprite val) {
+    for (int i = 0; i < (int)v.size(); i++) {
+      
+      	// When the element is found
+        if (v[i].name == val.name) {
+            return i;
+        }
+    }
+  	
+  	// When the element is not found
+  	return -1;
+}
+
 int screenWidth = 480; // Scratch stage dimentions
 int screenHeight = 360;
 int upscaling = 2;
+int targetFPS = 30;
+int offsetX = 0;
+int offsetY = 0;
 
 Vector2 scratchToRaylibVec(int x, int y) {
-    Vector2 vec;
-    vec.x = x + screenWidth / 2;
-    vec.y = y + screenHeight / 2;
-    return vec;
+    if (upscaling == 1) {
+        Vector2 vec;
+        vec.x = x + screenWidth / 2;
+        vec.y = y + screenHeight / 2;
+        return vec;
+    } else {
+        Vector2 vec;
+        vec.x = x + screenWidth / 2 * upscaling;
+        vec.y = y + screenHeight / 2 * upscaling;
+        return vec;
+    }
+}
+
+Sprite blockExec(Block block, Sprite sprite) {
+    if (block.opcode == "motion_pointindirection") {
+        sprite.direction = std::stod(block.inputs["DIRECTION"]);
+        return sprite;
+    }
+    return sprite;
 }
 
 int main(void) {
@@ -76,9 +107,18 @@ int main(void) {
     std::cout << "Select a project from the list (number): ";
     std::cin >> selectProject;
 
-    screenHeight = std::stoi(ini["generic"]["screenHeight"]);
-    screenWidth = std::stoi(ini["generic"]["screenWidth"]);
-    upscaling = std::stoi(ini["generic"]["upscaling"]);
+    try {
+        screenHeight = std::stoi(ini["generic"]["screenHeight"]);
+        screenWidth = std::stoi(ini["generic"]["screenWidth"]);
+        upscaling = std::stoi(ini["generic"]["upscaling"]);
+        targetFPS = std::stoi(ini["generic"]["targetFPS"]);
+        offsetX = std::stoi(ini["generic"]["offsetX"]);
+        offsetY = std::stoi(ini["generic"]["offsetY"]);
+    }
+    catch (...) {
+        std::cerr << "ERROR: Configs missing on generic section of config.ini\n";
+        return -1;
+    }
 
     fs::path projectFilez = projectPaths.at(selectProject);
     if (ini.has(projectFilez.stem().string())) {
@@ -90,6 +130,15 @@ int main(void) {
         }
         if (ini[projectFilez.stem().string()].has("upscaling")) {
             upscaling = std::stoi(ini[projectFilez.stem().string()]["upscaling"]);
+        }
+        if (ini[projectFilez.stem().string()].has("targetFPS")) {
+            targetFPS = std::stoi(ini[projectFilez.stem().string()]["targetFPS"]);
+        }
+        if (ini[projectFilez.stem().string()].has("offsetX")) {
+            offsetX = std::stoi(ini[projectFilez.stem().string()]["offsetX"]);
+        }
+        if (ini[projectFilez.stem().string()].has("offsetY")) {
+            offsetY = std::stoi(ini[projectFilez.stem().string()]["offsetY"]);
         }
     }
 
@@ -184,7 +233,16 @@ int main(void) {
             tempSprite.x = 0;
             tempSprite.y = 0;
         }
-        // Variables
+        if (!tempSprite.isStage) {
+            tempSprite.direction = sprite["direction"];
+        } else {
+            tempSprite.direction = 0;
+        }
+        if (!tempSprite.isStage) {
+            tempSprite.size = sprite["size"];
+        } else {
+            tempSprite.size = 100;
+        }
         for (auto& [key, value]: sprite["variables"].items()) {
             Variable tempVariable;
             tempVariable.name = value.at(0);
@@ -259,9 +317,9 @@ int main(void) {
     }
     std::cout << "Project populated!\n";    
 
-    InitWindow(screenWidth, screenHeight, "BoxScratch");
+    InitWindow(screenWidth * upscaling, screenHeight * upscaling, "BoxScratch");
 
-    SetTargetFPS(30); // Scratch max FPS (can break projects when changed)
+    SetTargetFPS(targetFPS); // Scratch max FPS (can break projects when changed)
 
     for (auto& costume: project.costumes) {
         std::string cachedFolder = "cached/";
@@ -302,13 +360,25 @@ int main(void) {
     }
 
     // Main loop
+    std::string nextBlock;
     while (!WindowShouldClose())
     {
+        // Block execution
+        for (auto& sprite: project.sprites) {
+            for (Stack& stack: sprite.stacks) {
+                if (stack.blocks.at(0).opcode == "event_whenflagclicked") {
+                    nextBlock = stack.blocks.at(0).next;
+                } else {
+                    Sprite newSprite = blockExec(project.blockMap[nextBlock], sprite);
+                    project.sprites.at(findSpriteIndex(project.sprites, newSprite)) = newSprite;
+                    nextBlock = project.blockMap[nextBlock].next;
+                }
+            }
+        }
+
         BeginDrawing();
 
             ClearBackground(WHITE);
-
-            // Block execution goes here
 
             // Render
             for (auto& sprite: project.sprites) {
@@ -318,9 +388,18 @@ int main(void) {
                             DrawTexture(i.gpuImage, 0, 0, WHITE);   
                         }
                         Vector2 pos = scratchToRaylibVec(sprite.x, sprite.y);
-                        pos.x = pos.x - i.width / 2;
-                        pos.y = pos.y - i.height / 2;
-                        DrawTextureV(i.gpuImage, pos, WHITE);
+                        pos.x = pos.x - i.width * 2 / upscaling;
+                        pos.y = pos.y - i.height * 2 / upscaling;
+                        pos.x = pos.x + offsetX;
+                        pos.y = pos.y + offsetY;
+                        if (sprite.isStage) {
+                            Vector2 stagePos;
+                            stagePos.x = 0;
+                            stagePos.y = 0;
+                            DrawTextureEx(i.gpuImage, stagePos, sprite.direction, 0, WHITE); 
+                        } else {
+                            DrawTextureEx(i.gpuImage, pos, 0, 1 * upscaling, WHITE); 
+                        }
                     }
                 }
             }

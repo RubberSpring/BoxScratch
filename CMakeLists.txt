@@ -65,7 +65,7 @@ set(dep raylib)
 add_git_dependency(
     ${dep}
     https://github.com/raysan5/raylib.git
-    head
+    5.5
 )
 
 FetchContent_GetProperties(${dep})
