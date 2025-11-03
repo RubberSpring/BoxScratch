@@ -33,6 +33,7 @@ endif()
 set(LIBRARIES ${PROJECT_NAME})
 
 include(FetchContent)
+include(cmake/CPM.cmake)
 function(add_git_dependency libName gitURL gitTag)
 
         FetchContent_Declare(${libName}
@@ -60,6 +61,7 @@ set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
 set(BUILD_GAMES    OFF CACHE BOOL "" FORCE) # don't build the supplied example games
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CUSTOMIZE_BUILD OFF CACHE BOOL "" FORCE) 
+set(PLATFORM "Desktop" CACHE STRING "" FORCE)
 set(dep raylib)
 
 add_git_dependency(
@@ -86,11 +88,49 @@ list(APPEND LIBRARIES ${dep})
 FetchContent_Declare(
     lunasvg
     GIT_REPOSITORY https://github.com/sammycage/lunasvg.git
-    GIT_TAG master  # Specify the desired branch or tag
+    GIT_TAG master
+    GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(lunasvg)
 
 list(APPEND LIBRARIES lunasvg::lunasvg)
+
+##########################################################################################
+# cpptrace Setup
+##########################################################################################
+
+FetchContent_Declare(
+  cpptrace
+  GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
+  GIT_TAG        v1.0.4
+)
+FetchContent_MakeAvailable(cpptrace)
+
+list(APPEND LIBRARIES cpptrace::cpptrace)
+
+##########################################################################################
+# Dear ImGui Setup
+##########################################################################################
+
+CPMAddPackage(
+    URI "gh:ocornut/imgui"
+    NAME ImGui
+    DOWNLOAD_ONLY TRUE
+    GIT_TAG master
+    GIT_SHALLOW TRUE
+)
+
+##########################################################################################
+# rlImGui Setup
+##########################################################################################
+
+CPMAddPackage(
+    URI "gh:raylib-extras/rlImGui"
+    NAME rlImGui
+    DOWNLOAD_ONLY TRUE
+    GIT_TAG main
+    GIT_SHALLOW TRUE
+)
 
 ##########################################################################################
 # libzip Setup
@@ -114,8 +154,17 @@ set(PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/include/")
 # Declaring our executable
 add_executable(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCES})
+target_sources(${PROJECT_NAME} PUBLIC 
+    ${ImGui_SOURCE_DIR}/imgui.cpp
+    ${ImGui_SOURCE_DIR}/imgui_demo.cpp
+    ${ImGui_SOURCE_DIR}/imgui_draw.cpp
+    ${ImGui_SOURCE_DIR}/imgui_tables.cpp
+    ${ImGui_SOURCE_DIR}/imgui_widgets.cpp)
+    target_sources(${PROJECT_NAME} PUBLIC ${rlImGui_SOURCE_DIR}/rlImGui.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_INCLUDE})
 target_include_directories(${PROJECT_NAME} PRIVATE extern/)
+target_include_directories(${PROJECT_NAME} PUBLIC ${ImGui_SOURCE_DIR})
+target_include_directories(${PROJECT_NAME} PUBLIC ${rlImGui_SOURCE_DIR})
 
 ##########################################################################################
 # Compiler and linker flags

@@ -3,13 +3,20 @@
 #include <zip.h>
 #include <lunasvg.h>
 #include <ini.h>
+#include "imgui.h"
+#include "rlImGui.h"
+#include <cpptrace/from_current.hpp>
+#include <cpptrace/cpptrace.hpp>
 
 #include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <istream>
+#include <cstdio>
+#include <stdexcept>
 
-#include <boxScratch/project.h>
+#include <boxScratch/blocks/motion.h>
+#include <boxScratch/scratchEnum.h>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -63,13 +70,18 @@ Vector2 scratchToRaylibVec(int x, int y) {
 
 Sprite blockExec(Block block, Sprite sprite) {
     if (block.opcode == "motion_pointindirection") {
-        sprite.direction = std::stod(block.inputs["DIRECTION"]);
-        return sprite;
+        return BlockExecutors::pointInDirection(block, sprite);
+    } else if (block.opcode == "motion_gotoxy") {
+        return BlockExecutors::goToXY(block, sprite);
     }
+    
     return sprite;
 }
 
-int main(void) {
+int main(int argc, char** argv) {
+    freopen("error.log", "w", stderr);
+    freopen("output.log", "w", stdout);
+
     mINI::INIFile file("config.ini");
 
     mINI::INIStructure ini;
@@ -120,7 +132,11 @@ int main(void) {
         return -1;
     }
 
-    fs::path projectFilez = projectPaths.at(selectProject);
+    if (selectProject > (int)projectPaths.size()) {
+        selectProject = 0;
+    }
+
+    fs::path projectFilez(projectPaths.at(selectProject));
     if (ini.has(projectFilez.stem().string())) {
         if (ini[projectFilez.stem().string()].has("screenWidth")) {
             screenWidth = std::stoi(ini[projectFilez.stem().string()]["screenWidth"]);
@@ -277,10 +293,40 @@ int main(void) {
             tempBlock.next = to_string(block["next"]);
             tempBlock.parent = to_string(block["parent"]);
             for (auto& [arg, val]: block["inputs"].items()) {
-                if (arg == "SUBSTACK" || arg == "TO") {
-                    tempBlock.inputs[arg] = val.at(1);
-                } else {
-                    tempBlock.inputs[arg] = val.at(1).at(1);
+                CPPTRACE_TRY {
+                    if (val.at(0) == 1) {
+                        Block tempShadow;
+                        if (val.at(1).at(0) == SHADOW_NUMBER) {
+                            tempBlock.shadowType = SHADOW_NUMBER;
+                        } else if (val.at(1).at(0) == SHADOW_POSITIVE_NUM) {
+                           tempBlock.shadowType = SHADOW_POSITIVE_NUM;
+                        } else if (val.at(1).at(0) == SHADOW_POSITIVE_INT) {
+                           tempBlock.shadowType = SHADOW_POSITIVE_INT;
+                        } else if (val.at(1).at(0) == SHADOW_INT) {
+                           tempBlock.shadowType = SHADOW_INT;
+                        } else if (val.at(1).at(0) == SHADOW_ANGLE) {
+                           tempBlock.shadowType = SHADOW_ANGLE;
+                        } else if (val.at(1).at(0) == SHADOW_COLOR) {
+                           tempBlock.shadowType = SHADOW_COLOR;
+                        } else if (val.at(1).at(0) == SHADOW_STRING) {
+                           tempBlock.shadowType = SHADOW_STRING;
+                        } else if (val.at(1).at(0) == SHADOW_BROADCAST) {
+                           tempBlock.shadowType = SHADOW_BROADCAST;
+                        } else if (val.at(1).at(0) == SHADOW_VARIABLE) {
+                           tempBlock.shadowType = SHADOW_VARIABLE;
+                        } else if (val.at(1).at(0) == SHADOW_LIST) {
+                           tempBlock.shadowType = SHADOW_LIST;
+                        }
+                        tempShadow.shadowValue = val.at(1).at(1);
+                        tempBlock.inputs[arg] = tempShadow;
+                    } else {
+                        Block tempReporter = project.blockMap[val.at(1)];
+                        tempBlock.inputs[arg] = tempReporter;
+                    }
+                } CPPTRACE_CATCH(const std::exception& e) {
+                    std::cerr<<"Exception: "<<e.what()<<std::endl;
+                    cpptrace::from_current_exception().print();
+                    return 1;
                 }
             }
             tempBlock.topLevel = block["topLevel"];
@@ -376,9 +422,13 @@ int main(void) {
             }
         }
 
+        rlImGuiSetup(true);
         BeginDrawing();
-
             ClearBackground(WHITE);
+            rlImGuiBegin();
+
+            bool open = true;
+            ImGui::ShowDemoWindow(&open);
 
             // Render
             for (auto& sprite: project.sprites) {
@@ -404,9 +454,11 @@ int main(void) {
                 }
             }
 
+        rlImGuiEnd();
         EndDrawing();
     }
 
+    rlImGuiShutdown();
     CloseWindow();
 
     fs::remove_all("cached/");

@@ -1,0 +1,23 @@
+#ifndef SCT_BX_ENUM
+#define SCT_BX_ENUM
+
+enum InputType {
+    INPUT_TYPE_SHADOW = 1,
+    INPUT_TYPE_BLOCK = 2,
+    INPUT_TYPE_OBSCURED = 3
+};
+
+enum ShadowType {
+    SHADOW_NUMBER = 4,
+    SHADOW_POSITIVE_NUM = 5,
+    SHADOW_POSITIVE_INT = 6,
+    SHADOW_INT = 7,
+    SHADOW_ANGLE = 8,
+    SHADOW_COLOR = 9,
+    SHADOW_STRING = 10,
+    SHADOW_BROADCAST = 11,
+    SHADOW_VARIABLE = 12,
+    SHADOW_LIST = 13
+};
+
+#endif
