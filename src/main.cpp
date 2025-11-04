@@ -1,12 +1,9 @@
 #include <json.hpp>
-#include "raylib.h"
 #include <zip.h>
 #include <lunasvg.h>
 #include <ini.h>
-#include "imgui.h"
-#include "rlImGui.h"
-#include <cpptrace/from_current.hpp>
-#include <cpptrace/cpptrace.hpp>
+#include <SDL.h>
+#include <SDL_image.h>
 
 #include <iostream>
 #include <filesystem>
@@ -53,20 +50,9 @@ int upscaling = 2;
 int targetFPS = 30;
 int offsetX = 0;
 int offsetY = 0;
-
-Vector2 scratchToRaylibVec(int x, int y) {
-    if (upscaling == 1) {
-        Vector2 vec;
-        vec.x = x + screenWidth / 2;
-        vec.y = y + screenHeight / 2;
-        return vec;
-    } else {
-        Vector2 vec;
-        vec.x = x + screenWidth / 2 * upscaling;
-        vec.y = y + screenHeight / 2 * upscaling;
-        return vec;
-    }
-}
+SDL_Window* window = NULL;
+SDL_Surface* screen = NULL;
+SDL_Renderer* renderer = NULL;
 
 Sprite blockExec(Block block, Sprite sprite) {
     if (block.opcode == "motion_pointindirection") {
@@ -78,10 +64,73 @@ Sprite blockExec(Block block, Sprite sprite) {
     return sprite;
 }
 
-int main(int argc, char** argv) {
-    freopen("error.log", "w", stderr);
-    freopen("output.log", "w", stdout);
+bool init() {
+    bool success = true;
 
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+		printf("SDL failed to initialize. SDL_Error: %s\n", SDL_GetError());
+		success = false;
+	}
+	else {
+		window = SDL_CreateWindow("BoxScratch", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth, screenHeight, SDL_WINDOW_SHOWN);
+		if (window == NULL) {
+			printf("Failed to create window. SDL_Error: %s\n", SDL_GetError());
+			success = false;
+		}
+		else {
+            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+            if (renderer == NULL) {
+                printf("failed to create renderer. SDL error: %s\n", SDL_GetError());
+                success = false;
+            }
+            else {
+                int imgFlags = IMG_INIT_PNG;
+                if (!(IMG_Init(imgFlags) & imgFlags)) {
+                    printf("SDL_image failed to initialize. SDL_image error: %s\n", IMG_GetError());
+                    success = false;
+                }
+                else {
+                    screen = SDL_GetWindowSurface(window);
+                }
+            }
+		}
+	}
+
+	return success;
+}
+
+SDL_Surface* loadSurface(std::string path) {
+    SDL_Surface* optimized = NULL;
+
+    SDL_Surface* loadedSurface = IMG_Load(path.c_str());
+    if (loadedSurface == NULL) {
+        printf("failed to load image %s. SDL_image error: %s\n", path.c_str(), IMG_GetError());
+    }
+    else {
+        optimized = SDL_ConvertSurface(loadedSurface, screen->format, 0);
+        if (optimized == NULL)
+        {
+            printf("failed to optimize image %s. SDL error: %s\n", path.c_str(), SDL_GetError());
+        }
+
+        SDL_FreeSurface(loadedSurface);
+    }
+
+    return optimized;
+}
+
+SDL_Texture* loadTexture(SDL_Surface* surface) {
+    SDL_Texture* texture = NULL;
+
+    texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture == NULL) {
+        printf("failed to create texture. SDL error: %s\n", SDL_GetError());
+    }
+
+    return texture;
+}
+
+int main(int argc, char** argv) {
     mINI::INIFile file("config.ini");
 
     mINI::INIStructure ini;
@@ -287,13 +336,15 @@ int main(int argc, char** argv) {
         }
         std::cout << "Broadcasts deserialized [" << tempSprite.name << "]\n";
         // Blocks
-        for (auto& [id, block]: sprite["blocks"].items()) {
+        for (auto& [id, scratchBlock]: sprite["blocks"].items()) {
             Block tempBlock;
-            tempBlock.opcode = block["opcode"];
-            tempBlock.next = to_string(block["next"]);
-            tempBlock.parent = to_string(block["parent"]);
-            for (auto& [arg, val]: block["inputs"].items()) {
-                CPPTRACE_TRY {
+            tempBlock.opcode = scratchBlock["opcode"];
+            tempBlock.next = to_string(scratchBlock["next"]);
+            tempBlock.parent = to_string(scratchBlock["parent"]);
+            tempBlock.topLevel = scratchBlock["topLevel"];
+            tempBlock.owner = tempSprite.name;
+            project.blockMap[id] = tempBlock;
+            for (auto& [arg, val]: scratchBlock["inputs"].items()) {
                     if (val.at(0) == 1) {
                         Block tempShadow;
                         if (val.at(1).at(0) == SHADOW_NUMBER) {
@@ -323,16 +374,9 @@ int main(int argc, char** argv) {
                         Block tempReporter = project.blockMap[val.at(1)];
                         tempBlock.inputs[arg] = tempReporter;
                     }
-                } CPPTRACE_CATCH(const std::exception& e) {
-                    std::cerr<<"Exception: "<<e.what()<<std::endl;
-                    cpptrace::from_current_exception().print();
-                    return 1;
                 }
             }
-            tempBlock.topLevel = block["topLevel"];
-            tempBlock.owner = tempSprite.name;
-            project.blockMap[id] = tempBlock;
-        }
+
         std::cout << "Blocks deserialized [" << tempSprite.name << "]\n";
         // Costumes
         tempSprite.costumeIndex = sprite["currentCostume"];
@@ -361,11 +405,10 @@ int main(int argc, char** argv) {
         }
         project.sprites.push_back(tempSprite);  
     }
+
     std::cout << "Project populated!\n";    
 
-    InitWindow(screenWidth * upscaling, screenHeight * upscaling, "BoxScratch");
-
-    SetTargetFPS(targetFPS); // Scratch max FPS (can break projects when changed)
+    init();
 
     for (auto& costume: project.costumes) {
         std::string cachedFolder = "cached/";
@@ -373,13 +416,13 @@ int main(int argc, char** argv) {
         std::vector<Costume> v = project.costumes;
         std::string filePath = cachedFolder + costume.dataName + costume.dataFormat;
         if (costume.dataFormat == ".png") {
-            Image tempImage = LoadImage((cachedFolder + costume.dataName + ".png").c_str());
-            costume.width = tempImage.width;
-            costume.height = tempImage.height;
-            costume.ogImage = ImageCopy(tempImage);
-            costume.cpuImage = ImageCopy(tempImage);
-            costume.gpuImage = LoadTextureFromImage(tempImage);
-            UnloadImage(tempImage);
+            SDL_Texture* tempTexture = loadTexture(loadSurface(cachedFolder + costume.dataName + ".png"));
+            SDL_Point size;
+            SDL_QueryTexture(tempTexture, NULL, NULL, &size.x, &size.y);
+            costume.width = size.x;
+            costume.height = size.y;
+            costume.image = NULL;
+            costume.texture = tempTexture;
         } else {
             auto document = lunasvg::Document::loadFromFile(filePath);
             if (document == nullptr) {
@@ -392,11 +435,13 @@ int main(int argc, char** argv) {
             costume.width = bitmap.width();
             costume.height = bitmap.height();
             bitmap.writeToPng(cachedFolder + costume.dataName + ".png");
-            Image tempImage = LoadImage((cachedFolder + costume.dataName + ".png").c_str());
-            costume.ogImage = ImageCopy(tempImage);
-            costume.cpuImage = ImageCopy(tempImage);
-            costume.gpuImage = LoadTextureFromImage(tempImage);
-            UnloadImage(tempImage);
+            SDL_Texture* tempTexture = loadTexture(loadSurface(cachedFolder + costume.dataName + ".png"));
+            SDL_Point size;
+            SDL_QueryTexture(tempTexture, NULL, NULL, &size.x, &size.y);
+            costume.width = size.x;
+            costume.height = size.y;
+            costume.image = NULL;
+            costume.texture = tempTexture;
         }
         for (auto &i : v) {
             if (i.dataName == costume.dataName) {
@@ -405,10 +450,21 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Main loop
+    bool quit = false;
+
+    SDL_Event e;  
+
     std::string nextBlock;
-    while (!WindowShouldClose())
-    {
+    while (!quit) {
+    	while (SDL_PollEvent( &e ) != 0) {
+    		if (e.type == SDL_QUIT) {
+    			quit = true;
+    		}
+    	}
+
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderClear(renderer);
+
         // Block execution
         for (auto& sprite: project.sprites) {
             for (Stack& stack: sprite.stacks) {
@@ -422,46 +478,28 @@ int main(int argc, char** argv) {
             }
         }
 
-        rlImGuiSetup(true);
-        BeginDrawing();
-            ClearBackground(WHITE);
-            rlImGuiBegin();
-
-            bool open = true;
-            ImGui::ShowDemoWindow(&open);
-
-            // Render
+        // Render
             for (auto& sprite: project.sprites) {
                 for (auto &i : project.costumes) {
                     if (sprite.costumes.at(sprite.costumeIndex).dataName == i.dataName) {
+                        SDL_Rect rect;
+                        rect.x = i.width * 2 / upscaling;
+                        rect.y = i.height * 2 / upscaling;
+                        SDL_Rect* rectPtr = &rect;
                         if (sprite.isStage) {
-                            DrawTexture(i.gpuImage, 0, 0, WHITE);   
-                        }
-                        Vector2 pos = scratchToRaylibVec(sprite.x, sprite.y);
-                        pos.x = pos.x - i.width * 2 / upscaling;
-                        pos.y = pos.y - i.height * 2 / upscaling;
-                        pos.x = pos.x + offsetX;
-                        pos.y = pos.y + offsetY;
-                        if (sprite.isStage) {
-                            Vector2 stagePos;
-                            stagePos.x = 0;
-                            stagePos.y = 0;
-                            DrawTextureEx(i.gpuImage, stagePos, sprite.direction, 0, WHITE); 
+                            SDL_RenderCopy(renderer, i.texture, NULL, rectPtr);
                         } else {
-                            DrawTextureEx(i.gpuImage, pos, 0, 1 * upscaling, WHITE); 
+                            SDL_RenderCopyEx(renderer, i.texture, NULL, rectPtr, sprite.direction - 90, NULL, SDL_FLIP_NONE);
                         }
                     }
                 }
             }
 
-        rlImGuiEnd();
-        EndDrawing();
+    	SDL_RenderPresent(renderer);
     }
-
-    rlImGuiShutdown();
-    CloseWindow();
 
     fs::remove_all("cached/");
 
     return 0;
+
 }

@@ -8,9 +8,8 @@ public:
     std::string name;
     std::string dataFormat;
     std::string dataName;
-    Image cpuImage;
-    Image ogImage;
-    Texture2D gpuImage;
+    SDL_Surface* image;
+    SDL_Texture* texture;
     float width;
     float height;
     int number;

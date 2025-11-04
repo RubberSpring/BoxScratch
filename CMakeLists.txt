@@ -1,89 +1,20 @@
 cmake_minimum_required(VERSION 3.22)
-get_filename_component(PROJECT_NAME ${CMAKE_CURRENT_LIST_DIR} NAME)
-project(${PROJECT_NAME} CXX)
-
-set(CMAKE_CXX_STANDARD 17)
-
-##########################################################################################
-# MSVC runtime linking
-##########################################################################################
-
-# this is here to ensure the runtime is linked staticly for msvc
-if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDebug")
-    else()
-        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
-    endif()
-endif()
-
-##########################################################################################
-# Platform Configuration
-##########################################################################################
-
-if (NOT DEFINED PLATFORM)
-    set(PLATFORM "default")
-endif()
-
-##########################################################################################
-# Add dependencies with FetchContent
-##########################################################################################
-
-# libraries array to be linked
-set(LIBRARIES ${PROJECT_NAME})
+project(boxscratch)
 
 include(FetchContent)
 include(cmake/CPM.cmake)
-function(add_git_dependency libName gitURL gitTag)
+include(FindPkgConfig)
 
-        FetchContent_Declare(${libName}
-            GIT_REPOSITORY ${gitURL}
-            GIT_TAG        ${gitTag}
-            GIT_SHALLOW    TRUE
-            GIT_PROGRESS   TRUE
-        )
+find_package(SDL2 REQUIRED)
+PKG_SEARCH_MODULE(SDL2IMAGE REQUIRED SDL2_image)
+include_directories(boxscratch ${SDL2_INCLUDE_DIRS})
+include_directories(boxscratch ${SDL2_IMAGE_INCLUDE_DIRS})
 
-        if(NOT ("${libName}" STREQUAL "libname"))
-            FetchContent_MakeAvailable(${libName})
-        endif()
-
-        # exclude lib to avoid errors
-        if(NOT "${libName}" STREQUAL "libname" AND NOT "${libName}" STREQUAL "rlImGui")
-            # target_compile_options(${libName} PRIVATE "-w")
-        endif()  
-endfunction()
-
-##########################################################################################
-# Raylib Setup
-##########################################################################################
-
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE) # don't build the supplied examples
-set(BUILD_GAMES    OFF CACHE BOOL "" FORCE) # don't build the supplied example games
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(CUSTOMIZE_BUILD OFF CACHE BOOL "" FORCE) 
-set(PLATFORM "Desktop" CACHE STRING "" FORCE)
-set(dep raylib)
-
-add_git_dependency(
-    ${dep}
-    https://github.com/raysan5/raylib.git
-    5.5
-)
-
-FetchContent_GetProperties(${dep})
-if(NOT ${dep}_POPULATED)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/external/raylib/config.h ${CMAKE_CURRENT_SOURCE_DIR}/build/_deps/raylib-src/src/config.h COPYONLY)
-    FetchContent_Populate(${dep})
-    
-    add_subdirectory(${${dep}_SOURCE_DIR} ${${dep}_BINARY_DIR})
-endif()
-    
-# add the dependency here to be linked
-list(APPEND LIBRARIES ${dep})
-
-##########################################################################################
-# LunaSVG Setup
-##########################################################################################
+add_executable(boxscratch src/main.cpp)
+target_link_libraries(boxscratch ${SDL2_LIBRARIES})
+target_link_libraries(boxscratch "-lSDL2_image")
+target_include_directories(boxscratch PUBLIC include)
+target_include_directories(boxscratch PUBLIC extern)
 
 FetchContent_Declare(
     lunasvg
@@ -92,248 +23,15 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(lunasvg)
+target_link_libraries(boxscratch lunasvg::lunasvg)
 
-list(APPEND LIBRARIES lunasvg::lunasvg)
-
-##########################################################################################
-# cpptrace Setup
-##########################################################################################
-
-FetchContent_Declare(
-  cpptrace
-  GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
-  GIT_TAG        v1.0.4
-)
-FetchContent_MakeAvailable(cpptrace)
-
-list(APPEND LIBRARIES cpptrace::cpptrace)
-
-##########################################################################################
-# Dear ImGui Setup
-##########################################################################################
-
-CPMAddPackage(
-    URI "gh:ocornut/imgui"
-    NAME ImGui
-    DOWNLOAD_ONLY TRUE
-    GIT_TAG master
-    GIT_SHALLOW TRUE
-)
-
-##########################################################################################
-# rlImGui Setup
-##########################################################################################
-
-CPMAddPackage(
-    URI "gh:raylib-extras/rlImGui"
-    NAME rlImGui
-    DOWNLOAD_ONLY TRUE
-    GIT_TAG main
-    GIT_SHALLOW TRUE
-)
-
-##########################################################################################
-# libzip Setup
-##########################################################################################
+#FetchContent_Declare(
+#  cpptrace
+#  GIT_REPOSITORY https://github.com/jeremy-rifkin/cpptrace.git
+#  GIT_TAG        v1.0.4
+#)
+#FetchContent_MakeAvailable(cpptrace)
+#target_link_libraries(boxscratch cpptrace::cpptrace)
 
 find_package(libzip REQUIRED)
-
-list(APPEND LIBRARIES libzip::zip)
-
-##########################################################################################
-# Project executable setup
-##########################################################################################
-
-# Adding our source files
-# Define PROJECT_SOURCES as a list of all source files
-file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp")
-
-# Define PROJECT_INCLUDE to be the path to the include directory of the project
-set(PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/include/")
-
-# Declaring our executable
-add_executable(${PROJECT_NAME})
-target_sources(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCES})
-target_sources(${PROJECT_NAME} PUBLIC 
-    ${ImGui_SOURCE_DIR}/imgui.cpp
-    ${ImGui_SOURCE_DIR}/imgui_demo.cpp
-    ${ImGui_SOURCE_DIR}/imgui_draw.cpp
-    ${ImGui_SOURCE_DIR}/imgui_tables.cpp
-    ${ImGui_SOURCE_DIR}/imgui_widgets.cpp)
-    target_sources(${PROJECT_NAME} PUBLIC ${rlImGui_SOURCE_DIR}/rlImGui.cpp)
-target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_INCLUDE})
-target_include_directories(${PROJECT_NAME} PRIVATE extern/)
-target_include_directories(${PROJECT_NAME} PUBLIC ${ImGui_SOURCE_DIR})
-target_include_directories(${PROJECT_NAME} PUBLIC ${rlImGui_SOURCE_DIR})
-
-##########################################################################################
-# Compiler and linker flags
-##########################################################################################
-
-if(NOT ${PLATFORM} STREQUAL "Web")
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++ -pthread")
-        target_link_libraries(${LIBRARIES} -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-        # dont forget to set  "cmake.configureSettings": { "CMAKE_BUILD_TYPE": "${buildType}" } in settings.json for vs code
-        if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
-        endif()
-    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        target_link_libraries(${LIBRARIES} -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
-        target_link_libraries(${LIBRARIES} -static-intel -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
-    elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        target_link_libraries(${LIBRARIES})
-
-        if(OFF)
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")  
-        endif()
-
-        # dont forget to set  "cmake.configureSettings": { "CMAKE_BUILD_TYPE": "${buildType}" } in settings.json for vs code
-        if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-            message("-- console enabled")
-            set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDebug")
-        else()
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")  
-        endif()
-    else()
-        target_link_libraries(${LIBRARIES})
-    endif()
-else()
-    target_link_libraries(${LIBRARIES})
-endif()
-
-
-##########################################################################################
-# Build flags and additional settings
-##########################################################################################
-
-add_definitions( -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} )
-
-# for web build when using emscripten
-if(ASYNCIFY)
-  # Add Raylib's async support
-  add_definitions(-DRAYLIB_ASYNC_ENABLE)
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s ASYNCIFY")
-
-  # Add the -O3 optimization flag
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-endif()
-
-# turn on minamal raylib config build to include minimal raylib modules
-if(USE_MINIMAL_RAYLIB_MODULES AND USE_RAYLIB)
-    # Function to toggle a define in a given config file
-    function(toggle_define file_path define)
-        file(READ "${file_path}" input_file_contents)
-        string(REPLACE "// #define ${define}" "#define ${define}" modified_contents "${input_file_contents}")
-        file(WRITE "${file_path}" "${modified_contents}")
-
-        file(READ "${file_path}" input_file_contents)
-        string(REPLACE "#define ${define}" "// #define ${define}" modified_contents "${input_file_contents}")
-        file(WRITE "${file_path}" "${modified_contents}")
-    endfunction()
-
-    # choose raylib modules to be excluded by uncommenting the lines below
-    set(module_strings
-        # "SUPPORT_MODULE_RSHAPES"
-        # "SUPPORT_MODULE_RTEXTURES" 
-        # "SUPPORT_MODULE_RTEXT" # needs RTEXTURES to work
-        "SUPPORT_MODULE_RMODELS"
-        "SUPPORT_MODULE_RAUDIO"
-    )
-
-    # Toggle each define in the config file
-    foreach(currentString ${module_strings})
-        toggle_define("${CMAKE_CURRENT_SOURCE_DIR}/build/_deps/raylib-src/src/config.h" ${currentString})
-    endforeach()
-
-    # enusre raylib is rebuilt with new config.h
-    add_custom_command(
-        TARGET ${PROJECT_NAME}
-        PRE_BUILD
-        COMMAND ${CMAKE_COMMAND} .
-    )
-else()
-    if(USE_RAYLIB)
-        # Function to toggle a define in a given config file
-        function(toggle_define file_path define)
-            file(READ "${file_path}" input_file_contents)
-            string(REPLACE "// #define ${define}" "#define ${define}" modified_contents "${input_file_contents}")
-            file(WRITE "${file_path}" "${modified_contents}")
-        endfunction()
-
-        # used to make sure all modules are turned back on
-        set(module_strings
-            "SUPPORT_MODULE_RSHAPES"
-            "SUPPORT_MODULE_RTEXTURES" 
-            "SUPPORT_MODULE_RTEXT"
-            "SUPPORT_MODULE_RMODELS"
-            "SUPPORT_MODULE_RAUDIO"
-        )
-
-        # Toggle each define in the config file
-        foreach(currentString ${module_strings})
-            toggle_define("${CMAKE_CURRENT_SOURCE_DIR}/build/_deps/raylib-src/src/config.h" ${currentString})
-        endforeach()
-
-        # enusre raylib is rebuilt with new config.h
-        add_custom_command(
-            TARGET ${PROJECT_NAME}
-            PRE_BUILD
-            COMMAND ${CMAKE_COMMAND} .
-        )
-    endif()
-endif()
-
-if (USE_REACTPHYSICS3D)
-    set(CMAKE_CXX_FLAGS "-m64")
-endif()
-
-# Setting ASSETS_PATH
-if (CMAKE_BUILD_TYPE MATCHES "Debug")
-    SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -O0 -DDEBUG")
-    message("-- console enabled")
-    if(NOT USE_NO_ASSETS AND NOT ${PLATFORM} STREQUAL "Web")
-        # Set the asset path macro to the absolute path on the dev machine
-        target_compile_definitions(${PROJECT_NAME} PUBLIC ASSETS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/assets/")   
-    endif()
-else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-    if(NOT USE_NO_ASSETS AND NOT ${PLATFORM} STREQUAL "Web")
-        # Set the asset path macro in release mode to a relative path that assumes the assets folder is in the same directory as the game executable
-        target_compile_definitions(${PROJECT_NAME} PUBLIC ASSETS_PATH="./assets/")
-    endif()
-    if(WIN32)
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -mwindows") 
-      endif()    
-      add_compile_definitions(NDEBUG)
-    endif()
-endif()
-
-# Set common compiler flags
-# SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Wswitch")
-# Set common compiler flags
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
-
-if (${PLATFORM} STREQUAL "Web")
-    # Tell Emscripten to build an .html file.
-    set(CMAKE_EXECUTABLE_SUFFIX ".html")
-    SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Os")
-    set(CMAKE_EXECUTABLE_SUFFIX ".html") # This line is used to set your executable to build with the emscripten html template so that you can directly open it.
-    set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
-    if(NOT USE_NO_ASSETS)
-        # set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -Os -Wall -s TOTAL_MEMORY=67108864 -s FORCE_FILESYSTEM=1 --preload-file assets/ --shell-file ../src/minshell.html")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -Os -Wall -s TOTAL_MEMORY=67108864 -s FORCE_FILESYSTEM=1 --preload-file assets/ --shell-file ../vendor/minshell.html")
-        target_compile_definitions(${PROJECT_NAME} PUBLIC ASSETS_PATH="/assets/") # Set the asset path macro in release mode to a relative path that assumes the assets folder is in the same directory as the game executable
-    else()
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -Os -Wall -s TOTAL_MEMORY=67108864 -s FORCE_FILESYSTEM=1 --shell-file ../vendor/minshell.html")
-    endif()
-endif()
-
-# Ensure that hot-reload is enabled for VS
-if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /ZI")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /SAFESEH:NO")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SAFESEH:NO")
-endif()
+target_link_libraries(boxscratch libzip::zip)

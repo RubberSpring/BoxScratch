@@ -46,3 +46,6 @@ cached/
 
 # Build folder
 build/
+
+# VSCode
+.vscode/
