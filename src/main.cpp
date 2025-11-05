@@ -72,7 +72,7 @@ bool init() {
 		success = false;
 	}
 	else {
-		window = SDL_CreateWindow("BoxScratch", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth, screenHeight, SDL_WINDOW_SHOWN);
+		window = SDL_CreateWindow("BoxScratch", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth * upscaling, screenHeight * upscaling, SDL_WINDOW_SHOWN);
 		if (window == NULL) {
 			printf("Failed to create window. SDL_Error: %s\n", SDL_GetError());
 			success = false;
@@ -119,10 +119,10 @@ SDL_Surface* loadSurface(std::string path) {
     return optimized;
 }
 
-SDL_Texture* loadTexture(SDL_Surface* surface) {
+SDL_Texture* loadTexture(std::string path) {
     SDL_Texture* texture = NULL;
 
-    texture = SDL_CreateTextureFromSurface(renderer, surface);
+    texture = IMG_LoadTexture(renderer, path.c_str());
     if (texture == NULL) {
         printf("failed to create texture. SDL error: %s\n", SDL_GetError());
     }
@@ -416,7 +416,7 @@ int main(int argc, char** argv) {
         std::vector<Costume> v = project.costumes;
         std::string filePath = cachedFolder + costume.dataName + costume.dataFormat;
         if (costume.dataFormat == ".png") {
-            SDL_Texture* tempTexture = loadTexture(loadSurface(cachedFolder + costume.dataName + ".png"));
+            SDL_Texture* tempTexture = loadTexture(cachedFolder + costume.dataName + ".png");
             SDL_Point size;
             SDL_QueryTexture(tempTexture, NULL, NULL, &size.x, &size.y);
             costume.width = size.x;
@@ -428,14 +428,14 @@ int main(int argc, char** argv) {
             if (document == nullptr) {
                 return -1;
             }
-            auto bitmap = document->renderToBitmap();
+            auto bitmap = document->renderToBitmap(document->width() * upscaling, document->height() * upscaling);
             if (bitmap.isNull()) {
                 return -1;
             }
             costume.width = bitmap.width();
             costume.height = bitmap.height();
             bitmap.writeToPng(cachedFolder + costume.dataName + ".png");
-            SDL_Texture* tempTexture = loadTexture(loadSurface(cachedFolder + costume.dataName + ".png"));
+            SDL_Texture* tempTexture = loadTexture(cachedFolder + costume.dataName + ".png");
             SDL_Point size;
             SDL_QueryTexture(tempTexture, NULL, NULL, &size.x, &size.y);
             costume.width = size.x;
@@ -483,10 +483,14 @@ int main(int argc, char** argv) {
                 for (auto &i : project.costumes) {
                     if (sprite.costumes.at(sprite.costumeIndex).dataName == i.dataName) {
                         SDL_Rect rect;
-                        rect.x = i.width * 2 / upscaling;
-                        rect.y = i.height * 2 / upscaling;
+                        rect.x = (screenWidth * upscaling) / 2 - (i.width / 2);
+                        rect.y = (screenHeight * upscaling) / 2 - (i.height / 2);
+                        rect.h = i.height;
+                        rect.w = i.width;
                         SDL_Rect* rectPtr = &rect;
                         if (sprite.isStage) {
+                            rect.x = 0;
+                            rect.y = 0;
                             SDL_RenderCopy(renderer, i.texture, NULL, rectPtr);
                         } else {
                             SDL_RenderCopyEx(renderer, i.texture, NULL, rectPtr, sprite.direction - 90, NULL, SDL_FLIP_NONE);
