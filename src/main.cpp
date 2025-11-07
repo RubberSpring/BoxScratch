@@ -4,6 +4,9 @@
 #include <ini.h>
 #include <SDL.h>
 #include <SDL_image.h>
+#ifdef _WIN32
+    #include <windows.h>
+#endif
 
 #include <iostream>
 #include <filesystem>
@@ -11,6 +14,7 @@
 #include <istream>
 #include <cstdio>
 #include <stdexcept>
+#include <algorithm>
 
 #include <boxScratch/blocks/motion.h>
 #include <boxScratch/scratchEnum.h>
@@ -18,31 +22,52 @@
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
+bool isASCII (const std::string& s) {
+    return !std::any_of(s.begin(), s.end(), [](char c) { 
+        return static_cast<unsigned char>(c) > 127; 
+    });
+}
+
 int findIndex(std::vector<Costume>& v, Costume val) {
     for (int i = 0; i < (int)v.size(); i++) {
       
-      	// When the element is found
+          // When the element is found
         if (v[i].dataName == val.dataName) {
             return i;
         }
     }
-  	
-  	// When the element is not found
-  	return -1;
+      
+      // When the element is not found
+      return -1;
 }
 
 int findSpriteIndex(std::vector<Sprite>& v, Sprite val) {
     for (int i = 0; i < (int)v.size(); i++) {
       
-      	// When the element is found
+          // When the element is found
         if (v[i].name == val.name) {
             return i;
         }
     }
-  	
-  	// When the element is not found
-  	return -1;
+      
+      // When the element is not found
+      return -1;
 }
+static std::string stripOuterQuotes(const std::string &s) {
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"') {
+        return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+#ifdef _WIN32
+    static void create_console(void) {
+        AllocConsole();
+        freopen("CONIN$", "r", stdin);
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    }
+#endif
 
 int screenWidth = 480; // Scratch stage dimentions
 int screenHeight = 360;
@@ -55,12 +80,17 @@ SDL_Surface* screen = NULL;
 SDL_Renderer* renderer = NULL;
 
 Sprite blockExec(Block block, Sprite sprite) {
+    printf("Executing block: %s\n", block.opcode.c_str()); // Add debug log
+    
     if (block.opcode == "motion_pointindirection") {
         return BlockExecutors::pointInDirection(block, sprite);
     } else if (block.opcode == "motion_gotoxy") {
         return BlockExecutors::goToXY(block, sprite);
+    } else if (block.opcode == "motion_turnright") {
+        return BlockExecutors::turnRight(block, sprite);
     }
     
+    printf("Warning: Unknown block type: %s\n", block.opcode.c_str()); // Add warning for unknown blocks
     return sprite;
 }
 
@@ -68,16 +98,16 @@ bool init() {
     bool success = true;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-		printf("SDL failed to initialize. SDL_Error: %s\n", SDL_GetError());
-		success = false;
-	}
-	else {
-		window = SDL_CreateWindow("BoxScratch", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth * upscaling, screenHeight * upscaling, SDL_WINDOW_SHOWN);
-		if (window == NULL) {
-			printf("Failed to create window. SDL_Error: %s\n", SDL_GetError());
-			success = false;
-		}
-		else {
+        printf("SDL failed to initialize. SDL_Error: %s\n", SDL_GetError());
+        success = false;
+    }
+    else {
+        window = SDL_CreateWindow("BoxScratch", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenWidth * upscaling, screenHeight * upscaling, SDL_WINDOW_SHOWN);
+        if (window == NULL) {
+            printf("Failed to create window. SDL_Error: %s\n", SDL_GetError());
+            success = false;
+        }
+        else {
             renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
             if (renderer == NULL) {
                 printf("failed to create renderer. SDL error: %s\n", SDL_GetError());
@@ -93,10 +123,10 @@ bool init() {
                     screen = SDL_GetWindowSurface(window);
                 }
             }
-		}
-	}
+        }
+    }
 
-	return success;
+    return success;
 }
 
 SDL_Surface* loadSurface(std::string path) {
@@ -130,7 +160,19 @@ SDL_Texture* loadTexture(std::string path) {
     return texture;
 }
 
+// Add this struct before main():
+struct StackState {
+    bool isStarted = false;
+    bool isForever = false;
+    std::string nextBlock;
+    std::string foreverStart;
+};
+
 int main(int argc, char** argv) {
+    #ifdef _WIN32
+        create_console();
+    #endif
+
     mINI::INIFile file("config.ini");
 
     mINI::INIStructure ini;
@@ -167,6 +209,9 @@ int main(int argc, char** argv) {
     int selectProject;
     std::cout << "Select a project from the list (number): ";
     std::cin >> selectProject;
+
+    freopen("output.log", "w", stdout);
+    freopen("error.log", "w", stderr); 
 
     try {
         screenHeight = std::stoi(ini["generic"]["screenHeight"]);
@@ -337,47 +382,64 @@ int main(int argc, char** argv) {
         std::cout << "Broadcasts deserialized [" << tempSprite.name << "]\n";
         // Blocks
         for (auto& [id, scratchBlock]: sprite["blocks"].items()) {
+            if (scratchBlock["opcode"] == "") {
+                continue;
+            }
             Block tempBlock;
             tempBlock.opcode = scratchBlock["opcode"];
-            tempBlock.next = to_string(scratchBlock["next"]);
+            tempBlock.id = id;
+            if (scratchBlock["next"].is_null()) {
+                tempBlock.hasNext = false;
+                tempBlock.next = "";
+            } else {
+                tempBlock.hasNext = true;
+                tempBlock.next = stripOuterQuotes(to_string(scratchBlock["next"]));
+            }
             tempBlock.parent = to_string(scratchBlock["parent"]);
             tempBlock.topLevel = scratchBlock["topLevel"];
             tempBlock.owner = tempSprite.name;
+            // leave inputs empty for now — resolve in second pass
             project.blockMap[id] = tempBlock;
+        }
+
+        // Second pass: resolve inputs, now that all blocks exist in project.blockMap
+        for (auto& [id, scratchBlock]: sprite["blocks"].items()) {
+            if (scratchBlock["opcode"] == "") continue;
+            Block &tempBlock = project.blockMap.at(id);
             for (auto& [arg, val]: scratchBlock["inputs"].items()) {
-                    if (val.at(0) == 1) {
-                        Block tempShadow;
-                        if (val.at(1).at(0) == SHADOW_NUMBER) {
-                            tempBlock.shadowType = SHADOW_NUMBER;
-                        } else if (val.at(1).at(0) == SHADOW_POSITIVE_NUM) {
-                           tempBlock.shadowType = SHADOW_POSITIVE_NUM;
-                        } else if (val.at(1).at(0) == SHADOW_POSITIVE_INT) {
-                           tempBlock.shadowType = SHADOW_POSITIVE_INT;
-                        } else if (val.at(1).at(0) == SHADOW_INT) {
-                           tempBlock.shadowType = SHADOW_INT;
-                        } else if (val.at(1).at(0) == SHADOW_ANGLE) {
-                           tempBlock.shadowType = SHADOW_ANGLE;
-                        } else if (val.at(1).at(0) == SHADOW_COLOR) {
-                           tempBlock.shadowType = SHADOW_COLOR;
-                        } else if (val.at(1).at(0) == SHADOW_STRING) {
-                           tempBlock.shadowType = SHADOW_STRING;
-                        } else if (val.at(1).at(0) == SHADOW_BROADCAST) {
-                           tempBlock.shadowType = SHADOW_BROADCAST;
-                        } else if (val.at(1).at(0) == SHADOW_VARIABLE) {
-                           tempBlock.shadowType = SHADOW_VARIABLE;
-                        } else if (val.at(1).at(0) == SHADOW_LIST) {
-                           tempBlock.shadowType = SHADOW_LIST;
-                        }
-                        tempShadow.shadowValue = val.at(1).at(1);
-                        tempBlock.inputs[arg] = tempShadow;
-                    } else {
-                        Block tempReporter = project.blockMap[val.at(1)];
-                        tempBlock.inputs[arg] = tempReporter;
-                    }
+                if (val.at(0) == 1) {
+                    Block tempShadow;
+                    int st = val.at(1).at(0);
+                    // store shadow type/value on the input block object
+                    tempShadow.shadowType = st;
+                    tempShadow.shadowValue = val.at(1).at(1);
+                    tempShadow.isShadow = true;
+                    tempBlock.inputs[arg] = tempShadow;
+                } else {
+                    std::string refId = val.at(1);
+                    tempBlock.inputs[arg] = project.blockMap.at(refId);
                 }
             }
-
+        }
         std::cout << "Blocks deserialized [" << tempSprite.name << "]\n";
+        // Stacks
+        for (auto& [id, block] : project.blockMap) {
+            if (block.owner != tempSprite.name) continue;
+            if (!block.topLevel) continue;
+            Stack tempStack;
+            tempStack.blocks.push_back(block);
+            std::string nextBlockId = block.next;
+            while (!nextBlockId.empty()) {
+                auto it = project.blockMap.find(nextBlockId);
+                if (it == project.blockMap.end()) {
+                    printf("Warning: missing block %s referenced in stack for sprite %s\n", nextBlockId.c_str(), tempSprite.name.c_str());
+                    break;
+                }
+                tempStack.blocks.push_back(it->second);
+                nextBlockId = it->second.next;
+            }
+            tempSprite.stacks.push_back(tempStack);
+        }
         // Costumes
         tempSprite.costumeIndex = sprite["currentCostume"];
         for (auto& costume: sprite["costumes"]) {
@@ -449,31 +511,80 @@ int main(int argc, char** argv) {
             }
         }
     }
-
     bool quit = false;
 
     SDL_Event e;  
 
     std::string nextBlock;
+
+    bool isForever = false;
+    std::string foreverStart;
+    // In main(), before the game loop, add:
+    std::map<std::string, StackState> stackStates;
+
     while (!quit) {
-    	while (SDL_PollEvent( &e ) != 0) {
-    		if (e.type == SDL_QUIT) {
-    			quit = true;
-    		}
-    	}
+        SDL_PollEvent( &e );
+        if (e.type == SDL_QUIT) {
+            quit = true;
+        }
 
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderClear(renderer);
 
         // Block execution
-        for (auto& sprite: project.sprites) {
-            for (Stack& stack: sprite.stacks) {
-                if (stack.blocks.at(0).opcode == "event_whenflagclicked") {
-                    nextBlock = stack.blocks.at(0).next;
-                } else {
-                    Sprite newSprite = blockExec(project.blockMap[nextBlock], sprite);
-                    project.sprites.at(findSpriteIndex(project.sprites, newSprite)) = newSprite;
-                    nextBlock = project.blockMap[nextBlock].next;
+        for (auto& sprite : project.sprites) {
+            for (Stack& stack : sprite.stacks) {
+                if (stack.blocks.size() == 0) continue;
+                
+                // Get or create state for this stack
+                std::string stackId = stack.blocks[0].id;
+                auto& state = stackStates[stackId];
+                
+                // Only start new stacks that haven't been started
+                if (!state.isStarted && stack.blocks[0].opcode == "event_whenflagclicked") {
+                    state.isStarted = true;
+                    state.nextBlock = stack.blocks[0].next;
+                }
+
+                // Continue executing this stack if it has a next block
+                if (!state.nextBlock.empty()) {
+                    auto itBlock = project.blockMap.find(state.nextBlock);
+                    if (itBlock == project.blockMap.end()) {
+                        printf("Warning: referenced block %s not found\n", state.nextBlock.c_str());
+                        state.nextBlock.clear();
+                        continue;
+                    }
+                    Block currentBlock = itBlock->second;
+
+                    if (!isASCII(currentBlock.opcode) || currentBlock.opcode.empty()) {
+                        printf("Warning: Corrupt block %s\n", currentBlock.id.c_str());
+                        project.blockMap.erase(itBlock);
+                        state.nextBlock.clear();
+                        continue;
+                    }
+
+                    if (currentBlock.opcode == "control_forever") {
+                        state.isForever = true;
+                        auto itInput = currentBlock.inputs.find("SUBSTACK");
+                        if (itInput == currentBlock.inputs.end()) {
+                            printf("Warning: forever block missing SUBSTACK\n");
+                            state.nextBlock.clear();
+                            continue;
+                        }
+                        state.foreverStart = itInput->second.id;
+                        state.nextBlock = state.foreverStart;
+                    } else {
+                        sprite = blockExec(currentBlock, sprite);
+                        int idx = findSpriteIndex(project.sprites, sprite);
+                        if (idx >= 0) project.sprites.at(idx) = sprite;
+
+                        if (!currentBlock.hasNext && state.isForever) {
+                            state.nextBlock = state.foreverStart;
+                            break; // Break for frame render
+                        } else {
+                            state.nextBlock = currentBlock.next;
+                        }
+                    }
                 }
             }
         }
@@ -499,7 +610,7 @@ int main(int argc, char** argv) {
                 }
             }
 
-    	SDL_RenderPresent(renderer);
+        SDL_RenderPresent(renderer);
     }
 
     fs::remove_all("cached/");

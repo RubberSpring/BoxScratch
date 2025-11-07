@@ -22,6 +22,11 @@ namespace BlockExecutors {
         sprite.y = std::stod(evalBlockInput("Y", block));
         return sprite;
     }
+    Sprite turnRight(Block block, Sprite sprite) {
+        double currentAngle = sprite.direction;
+        sprite.direction = currentAngle + std::stod(evalBlockInput("DEGREES", block));
+        return sprite;
+    }
 }
 
 #endif

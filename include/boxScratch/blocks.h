@@ -17,6 +17,7 @@ public:
     bool isShadow;
     std::string shadowValue;
     int shadowType;
+    bool hasNext;
 
     void pretty();
 };
